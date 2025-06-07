@@ -8,6 +8,10 @@ import re
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"message": "Hello from FastAPI on Render"}
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
