@@ -201,8 +201,6 @@ async def extract_pdf(file: UploadFile = File(...)):
     chapters = []
 
     for i, page in enumerate(doc):
-        if i >= 10:
-            break
         page_data = extract_page_data_with_plumber(i, pdf_bytes)
         page_data["page_number"] = i + 1
         title = page_data["titles"]
