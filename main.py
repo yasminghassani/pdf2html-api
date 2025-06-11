@@ -19,15 +19,24 @@ async def health():
 def point_to_px(pt):
     return round(pt * 1.333, 2)
 
-def guess_chapter_name(spans):
-    if not spans:
-        return "Untitled"
-    sorted_spans = sorted(spans, key=lambda s: s["size"], reverse=True)
-    for span in sorted_spans:
-        text = span["text"].strip()
-        if len(text) > 3 and re.search(r"(chapter|guide|section|intro|handbook)", text, re.IGNORECASE):
-            return text
-    return sorted_spans[0]["text"].strip()
+def guess_chapter_name(text_blocks):
+    if not text_blocks:
+        return None
+
+    # Focus on text near the top of the page
+    top_blocks = [tb for tb in text_blocks if tb["y"] < 200 and tb["font_size"] >= 16]
+
+    if not top_blocks:
+        return None
+
+    top_blocks.sort(key=lambda tb: -tb["font_size"])
+    candidate = top_blocks[0]["text"].strip()
+
+    # Avoid junk
+    if not candidate or candidate.lower().startswith("page"):
+        return None
+
+    return candidate
 
 def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -120,7 +129,6 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
         "text_blocks": text_blocks,
         "image_blocks": image_blocks,
         "background_shapes": background_shapes,
-        "titles": guess_chapter_name(text_spans)
     }
 
 def render_tailwind_html(page, page_number=1):
@@ -130,22 +138,6 @@ def render_tailwind_html(page, page_number=1):
     html_parts = [
         f"<div class='relative bg-white dark:bg-gray-900 border shadow-md rounded-md overflow-hidden' style='width:{width}px; height:{height}px;'>"
     ]
-
-    # ✅ Only add background vector to page 1
-    if page_number == 1:
-        html_parts.append(
-            """
-            <svg class="absolute" style="bottom: 0; right: 0; width: 50%; height: 50%; z-index: 0;" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="blueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stop-color="#2196F3" />
-                  <stop offset="100%" stop-color="#9C27B0" />
-                </linearGradient>
-              </defs>
-              <path d="M0,100 Q50,0 100,100 Z" fill="url(#blueGradient)" />
-            </svg>
-            """
-        )
 
     for block in page["text_blocks"]:
         x = point_to_px(block["x"])
@@ -197,26 +189,46 @@ async def extract_pdf(file: UploadFile = File(...)):
     pdf_bytes = await file.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     result = []
-    seen_chapters = {}
     chapters = []
+    start_page = None
+    last_chapter = None
+    chapter_id = 1
+
+    toc = doc.get_toc()
+    print("TOC:", toc)
+    if toc:  # ✅ Use ToC if available
+        for i, item in enumerate(toc):
+            level, title, start_page = item
+            chapters.append({
+                "title": title.strip(),
+                "start_page": start_page,
+            })
 
     for i, page in enumerate(doc):
         page_data = extract_page_data_with_plumber(i, pdf_bytes)
         page_data["page_number"] = i + 1
-        title = page_data["titles"]
         page_number = page_data["page_number"]
 
-        if title not in seen_chapters:
-            seen_chapters[title] = page_number
-            chapters.append({
-                "title": title,
-                "start_page": page_number
-            })
+        # Fallback chapter detection (if no ToC)
+        if not toc:
+            title = guess_chapter_name(page_data.get("text_blocks", []))
+
+            if title and title != last_chapter:
+                chapters.append({
+                    "id": "chapter" + str(chapter_id),
+                    "title": title,
+                    "start_page": i + 1,
+                    "end_page": i + 1
+                })
+                chapter_id = chapter_id + 1
+                last_chapter = title
+            elif chapters:
+                chapters[-1]["end_page"] = i + 1  # extend last chapter
 
         html = render_tailwind_html(page_data, page_number)
 
         result.append({
-            "page_number": i + 1,
+            "page_number": page_number,
             "html": html
         })
 
