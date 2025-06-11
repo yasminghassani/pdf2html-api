@@ -76,21 +76,18 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
                         "size": span["size"]
                     })
 
-        elif block["type"] == 4:
-            bbox = block["bbox"]
-            color = block.get("color", 0)
-            if isinstance(color, int):
-                r = (color >> 16) & 255
-                g = (color >> 8) & 255
-                b = color & 255
-            else:
-                r, g, b = 0, 0, 0
+    # Extract vector background shapes (e.g., colored rectangles)
+    for drawing in page.get_drawings():
+        if drawing.get("fill"):  # Only extract filled shapes
+            bbox = drawing["rect"]
+            color = drawing["fill"]
+            r, g, b = [round(c * 255) for c in color]
 
             background_shapes.append({
-                "x": bbox[0],
-                "y": bbox[1],
-                "width": bbox[2] - bbox[0],
-                "height": bbox[3] - bbox[1],
+                "x": bbox.x0,
+                "y": bbox.y0,
+                "width": bbox.width,
+                "height": bbox.height,
                 "color": {"r": r, "g": g, "b": b}
             })
 
@@ -150,6 +147,9 @@ def render_tailwind_html(page, page_number=1):
         is_white = r >= 225 and g >= 225 and b >= 225
 
         color_class = "text-black dark:text-white"
+        if is_white:
+            color_class = "text-white dark:text-black"
+
         if not (is_black or is_white):
             color_str = f"rgb({r},{g},{b})"
             color_class = ""
@@ -171,6 +171,18 @@ def render_tailwind_html(page, page_number=1):
         html_parts.append(
             f"<div class='absolute whitespace-pre font-sans {color_class} {gradient_style}' style='{style}'>{text}</div>"
         )
+
+    for shape in page.get("background_shapes", []):
+        x = point_to_px(shape["x"])
+        y = point_to_px(shape["y"])
+        w = point_to_px(shape["width"])
+        h = point_to_px(shape["height"])
+        color = shape["color"]
+        r, g, b = color["r"], color["g"], color["b"]
+        html_parts.append(
+            f"<div class='absolute' style='border-radius: 1rem; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:rgb({r},{g},{b}); z-index:0;'></div>"
+        )
+
 
     for image in page["image_blocks"]:
         x = point_to_px(image["x"])
