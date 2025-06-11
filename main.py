@@ -83,12 +83,16 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
             color = drawing["fill"]
             r, g, b = [round(c * 255) for c in color]
 
+            # Heuristic: consider it a shadow if it's dark and slightly offset
+            is_shadow = (r < 100 and g < 100 and b < 100 and bbox.width > 30 and bbox.height > 30)
+
             background_shapes.append({
                 "x": bbox.x0,
                 "y": bbox.y0,
                 "width": bbox.width,
                 "height": bbox.height,
-                "color": {"r": r, "g": g, "b": b}
+                "color": {"r": r, "g": g, "b": b},
+                "type": "shadow" if is_shadow else "shape"
             })
 
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
@@ -179,10 +183,15 @@ def render_tailwind_html(page, page_number=1):
         h = point_to_px(shape["height"])
         color = shape["color"]
         r, g, b = color["r"], color["g"], color["b"]
-        html_parts.append(
-            f"<div class='absolute' style='border-radius: 1rem; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:rgb({r},{g},{b}); z-index:0;'></div>"
-        )
 
+        if shape.get("type") == "shadow":
+            html_parts.append(
+                f"<div class='absolute' style='border-radius: 0.5rem; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1); left:{x}px; top:{y}px; width:{w}px; height:{h}px; z-index:0;'></div>"
+            )
+        else:
+            html_parts.append(
+                f"<div class='absolute' style='border-radius: 1rem; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:rgb({r},{g},{b}); z-index:0;'></div>"
+            )
 
     for image in page["image_blocks"]:
         x = point_to_px(image["x"])
