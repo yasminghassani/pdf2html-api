@@ -8,16 +8,20 @@ import re
 
 app = FastAPI()
 
+
 @app.get("/")
 async def root():
     return {"message": "Hello from FastAPI on Render"}
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+
 def point_to_px(pt):
     return round(pt * 1.333, 2)
+
 
 def guess_chapter_name(text_blocks):
     if not text_blocks:
@@ -37,6 +41,7 @@ def guess_chapter_name(text_blocks):
         return None
 
     return candidate
+
 
 def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -60,21 +65,20 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
                     else:
                         r, g, b = 0, 0, 0
 
-                    text_blocks.append({
-                        "text": span["text"],
-                        "x": span["bbox"][0],
-                        "y": span["bbox"][1],
-                        "width": span["bbox"][2] - span["bbox"][0],
-                        "height": span["bbox"][3] - span["bbox"][1],
-                        "font_size": span["size"],
-                        "font": span.get("font", "unknown"),
-                        "color": {"r": r, "g": g, "b": b}
-                    })
+                    text_blocks.append(
+                        {
+                            "text": span["text"],
+                            "x": span["bbox"][0],
+                            "y": span["bbox"][1],
+                            "width": span["bbox"][2] - span["bbox"][0],
+                            "height": span["bbox"][3] - span["bbox"][1],
+                            "font_size": span["size"],
+                            "font": span.get("font", "unknown"),
+                            "color": {"r": r, "g": g, "b": b},
+                        }
+                    )
 
-                    text_spans.append({
-                        "text": span["text"],
-                        "size": span["size"]
-                    })
+                    text_spans.append({"text": span["text"], "size": span["size"]})
 
     # Extract vector background shapes (e.g., colored rectangles)
     for drawing in page.get_drawings():
@@ -84,16 +88,20 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
             r, g, b = [round(c * 255) for c in color]
 
             # Heuristic: consider it a shadow if it's dark and slightly offset
-            is_shadow = (r < 100 and g < 100 and b < 100 and bbox.width > 30 and bbox.height > 30)
+            is_shadow = (
+                r < 100 and g < 100 and b < 100 and bbox.width > 30 and bbox.height > 30
+            )
 
-            background_shapes.append({
-                "x": bbox.x0,
-                "y": bbox.y0,
-                "width": bbox.width,
-                "height": bbox.height,
-                "color": {"r": r, "g": g, "b": b},
-                "type": "shadow" if is_shadow else "shape"
-            })
+            background_shapes.append(
+                {
+                    "x": bbox.x0,
+                    "y": bbox.y0,
+                    "width": bbox.width,
+                    "height": bbox.height,
+                    "color": {"r": r, "g": g, "b": b},
+                    "type": "shadow" if is_shadow else "shape",
+                }
+            )
 
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         plumber_page = pdf.pages[page_index]
@@ -113,13 +121,15 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
                 cropped_image.save(buffered, format="PNG")
                 img_b64 = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()}"
 
-                image_blocks.append({
-                    "base64": img_b64,
-                    "x": x0,
-                    "y": bottom - height_img,
-                    "width": width_img,
-                    "height": height_img
-                })
+                image_blocks.append(
+                    {
+                        "base64": img_b64,
+                        "x": x0,
+                        "y": bottom - height_img,
+                        "width": width_img,
+                        "height": height_img,
+                    }
+                )
 
             except Exception:
                 continue
@@ -132,10 +142,11 @@ def extract_page_data_with_plumber(page_index: int, pdf_bytes: bytes):
         "background_shapes": background_shapes,
     }
 
+
 def render_tailwind_html(page, page_number=1):
     width = point_to_px(page["width"])
     height = point_to_px(page["height"])
-    
+
     html_parts = [
         f"<div class='relative bg-white dark:bg-gray-900 border shadow-md rounded-md overflow-hidden' style='width:{width}px; height:{height}px;'>"
     ]
@@ -167,7 +178,12 @@ def render_tailwind_html(page, page_number=1):
                 "text-transparent bg-clip-text font-bold"
             )
 
-        text = block["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = (
+            block["text"]
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
         style = f"left:{x}px; top:{y}px; font-size:{font_size}px; font-family:{block['font']}; z-index:1;"
         if not color_class:
             style += f" color:{color_str};"
@@ -205,6 +221,7 @@ def render_tailwind_html(page, page_number=1):
     html_parts.append("</div>")
     return "\n".join(html_parts)
 
+
 @app.post("/extract-pdf")
 async def extract_pdf(file: UploadFile = File(...)):
     pdf_bytes = await file.read()
@@ -215,15 +232,28 @@ async def extract_pdf(file: UploadFile = File(...)):
     last_chapter = None
     chapter_id = 1
 
+    # Extract full text from the PDF
+    full_text = ""
+    for page in doc:
+        full_text += page.get_text()
+
+    # Extract title from metadata
+    metadata = doc.metadata
+    pdf_title = (
+        metadata.get("title", "") or file.filename
+    )  # fallback to filename if title missing
+
     toc = doc.get_toc()
     print("TOC:", toc)
     if toc:  # ✅ Use ToC if available
         for i, item in enumerate(toc):
             level, title, start_page = item
-            chapters.append({
-                "title": title.strip(),
-                "start_page": start_page,
-            })
+            chapters.append(
+                {
+                    "title": title.strip(),
+                    "start_page": start_page,
+                }
+            )
 
     for i, page in enumerate(doc):
         page_data = extract_page_data_with_plumber(i, pdf_bytes)
@@ -235,12 +265,14 @@ async def extract_pdf(file: UploadFile = File(...)):
             title = guess_chapter_name(page_data.get("text_blocks", []))
 
             if title and title != last_chapter:
-                chapters.append({
-                    "id": "chapter" + str(chapter_id),
-                    "title": title,
-                    "start_page": i + 1,
-                    "end_page": i + 1
-                })
+                chapters.append(
+                    {
+                        "id": "chapter" + str(chapter_id),
+                        "title": title,
+                        "start_page": i + 1,
+                        "end_page": i + 1,
+                    }
+                )
                 chapter_id = chapter_id + 1
                 last_chapter = title
             elif chapters:
@@ -248,9 +280,14 @@ async def extract_pdf(file: UploadFile = File(...)):
 
         html = render_tailwind_html(page_data, page_number)
 
-        result.append({
-            "page_number": page_number,
-            "html": html
-        })
+        result.append({"page_number": page_number, "html": html})
 
-    return JSONResponse(content={"pages": result, "total_pages": len(doc), "chapters": chapters})
+    return JSONResponse(
+        content={
+            "title": pdf_title,
+            "full_text": full_text,
+            "pages": result,
+            "total_pages": len(doc),
+            "chapters": chapters,
+        }
+    )
